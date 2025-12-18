@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brick Breaker Pro</title>
+
+<style>
+*{box-sizing:border-box;font-family:Segoe UI,Arial,sans-serif}
+
+body{
+margin:0;
+min-height:100vh;
+background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);
+display:flex;
+justify-content:center;
+align-items:center;
+color:white
+}
+
+.container{
+width:740px;
+background:rgba(255,255,255,.12);
+backdrop-filter:blur(14px);
+border-radius:26px;
+padding:22px;
+box-shadow:0 30px 60px rgba(0,0,0,.6);
+text-align:center;
+position:relative
+}
+
+h1{
+margin:5px 0 12px;
+font-size:2.6rem;
+background:linear-gradient(to right,#00f260,#0575e6);
+-webkit-background-clip:text;
+color:transparent
+}
+
+.controls input,select,button{
+width:100%;
+padding:12px;
+margin-top:10px;
+border:none;
+border-radius:25px;
+font-size:16px
+}
+
+button{
+background:linear-gradient(to right,#00f260,#0575e6);
+color:white;
+cursor:pointer
+}
+
+canvas{
+display:none;
+margin-top:16px;
+border-radius:18px;
+background:#000;
+box-shadow:0 0 25px rgba(0,255,255,.4)
+}
+
+.hud{
+display:flex;
+justify-content:space-between;
+margin-top:12px;
+font-weight:bold
+}
+
+.message{
+margin-top:8px;
+font-size:14px;
+opacity:.9
+}
+
+.hidden{display:none}
+
+/* ===== GAME OVER MODAL ===== */
+.overlay{
+position:absolute;
+inset:0;
+background:rgba(0,0,0,.75);
+display:none;
+justify-content:center;
+align-items:center;
+border-radius:26px
+}
+
+.modal{
+background:rgba(255,255,255,.12);
+backdrop-filter:blur(15px);
+padding:25px;
+border-radius:22px;
+width:85%;
+box-shadow:0 20px 40px rgba(0,0,0,.7)
+}
+
+.modal h2{
+margin:0 0 10px;
+font-size:2.2rem;
+color:#ff6b6b
+}
+
+.modal p{
+margin:6px 0;
+font-size:16px
+}
+
+.modal button{
+margin-top:12px
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+<h1>Brick Breaker Pro</h1>
+
+<!-- MENU -->
+<div id="menu" class="controls">
+<input placeholder="Player Name">
+<select id="levelSelect">
+<option value="1">Level 1 – Easy</option>
+<option value="2">Level 2 – Medium</option>
+<option value="3">Level 3 – Hard</option>
+</select>
+<button id="startBtn">Start Game</button>
+</div>
+
+<!-- CANVAS -->
+<canvas id="gameCanvas" width="650" height="380"></canvas>
+
+<div class="hud">
+<div>Score: <span id="score">0</span></div>
+<div>Lives: <span id="lives">3</span></div>
+<div>Level: <span id="levelDisplay">1</span></div>
+</div>
+
+<div class="message">
+← → Move Paddle | SPACE / CLICK to Launch
+</div>
+
+<!-- GAME OVER MODAL -->
+<div id="gameOverOverlay" class="overlay">
+<div class="modal">
+<h2>Game Over</h2>
+<p>Final Score: <strong id="finalScore">0</strong></p>
+<p>Level Played: <strong id="finalLevel">1</strong></p>
+
+<button onclick="restartSameLevel()">Play Again</button>
+<button onclick="backToMenu()">Change Level</button>
+<button onclick="exitGame()">Exit Game</button>
+</div>
+</div>
+
+</div>
+
+<script>
+/* ===== CANVAS ===== */
+const canvas=document.getElementById("gameCanvas");
+const ctx=canvas.getContext("2d");
+
+/* ===== UI ===== */
+const scoreEl=document.getElementById("score");
+const livesEl=document.getElementById("lives");
+const levelEl=document.getElementById("levelDisplay");
+const menu=document.getElementById("menu");
+const overlay=document.getElementById("gameOverOverlay");
+const finalScoreEl=document.getElementById("finalScore");
+const finalLevelEl=document.getElementById("finalLevel");
+
+/* ===== STATE ===== */
+let score=0,lives=3,level=1;
+let running=false,launched=false;
+
+/* ===== INPUT ===== */
+let left=false,right=false;
+document.addEventListener("keydown",e=>{
+if(e.key==="ArrowLeft")left=true;
+if(e.key==="ArrowRight")right=true;
+if(e.key===" ")launch();
+});
+document.addEventListener("keyup",e=>{
+if(e.key==="ArrowLeft")left=false;
+if(e.key==="ArrowRight")right=false;
+});
+canvas.addEventListener("click",launch);
+
+/* ===== OBJECTS ===== */
+const paddle={w:100,h:14,x:275,speed:7};
+const ball={x:0,y:0,r:8,dx:0,dy:0};
+
+const levels={
+1:{rows:3,cols:5,speed:3,paddle:100},
+2:{rows:4,cols:7,speed:4,paddle:90},
+3:{rows:5,cols:9,speed:5,paddle:80}
+};
+
+let bricks=[];
+const bw=50,bh=18,pad=8,topOff=45,leftOff=20;
+
+/* ===== FUNCTIONS ===== */
+function initBricks(){
+bricks=[];
+for(let c=0;c<levels[level].cols;c++){
+bricks[c]=[];
+for(let r=0;r<levels[level].rows;r++)
+bricks[c][r]={x:0,y:0,hit:false};
+}
+}
+
+function resetBall(){
+launched=false;
+ball.x=paddle.x+paddle.w/2;
+ball.y=canvas.height-paddle.h-ball.r;
+ball.dx=0;ball.dy=0;
+}
+
+function launch(){
+if(!launched){
+launched=true;
+const center=paddle.x+paddle.w/2;
+const offset=(ball.x-center)/(paddle.w/2);
+ball.dx=offset*5;
+ball.dy=-levels[level].speed;
+}
+}
+
+function drawPaddle(){
+ctx.fillStyle="#00f260";
+ctx.fillRect(paddle.x,canvas.height-paddle.h,paddle.w,paddle.h);
+}
+
+function drawBall(){
+ctx.beginPath();
+ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
+ctx.fillStyle="#fff";
+ctx.fill();
+}
+
+function drawBricks(){
+for(let c in bricks)
+for(let r in bricks[c]){
+const b=bricks[c][r];
+if(!b.hit){
+b.x=c*(bw+pad)+leftOff;
+b.y=r*(bh+pad)+topOff;
+ctx.fillStyle="hsl("+(r*45)+",80%,60%)";
+ctx.fillRect(b.x,b.y,bw,bh);
+}}
+}
+
+function collision(){
+for(let c in bricks)
+for(let r in bricks[c]){
+const b=bricks[c][r];
+if(!b.hit &&
+ball.x>b.x && ball.x<b.x+bw &&
+ball.y>b.y && ball.y<b.y+bh){
+ball.dy*=-1;
+b.hit=true;
+score+=10;
+scoreEl.textContent=score;
+}}
+}
+
+function showGameOver(){
+running=false;
+finalScoreEl.textContent=score;
+finalLevelEl.textContent=level;
+overlay.style.display="flex";
+}
+
+/* ===== LOOP ===== */
+function loop(){
+if(!running)return;
+
+ctx.clearRect(0,0,canvas.width,canvas.height);
+drawBricks();drawPaddle();
+
+if(!launched)resetBall();
+else{ball.x+=ball.dx;ball.y+=ball.dy}
+
+drawBall();collision();
+
+if(ball.x<ball.r||ball.x>canvas.width-ball.r)ball.dx*=-1;
+if(ball.y<ball.r)ball.dy*=-1;
+
+if(ball.y+ball.r>=canvas.height-paddle.h &&
+ball.x>paddle.x&&ball.x<paddle.x+paddle.w){
+const center=paddle.x+paddle.w/2;
+const offset=(ball.x-center)/(paddle.w/2);
+ball.dx=offset*6;
+ball.dy=-Math.abs(ball.dy);
+}
+
+if(ball.y>canvas.height){
+lives--;
+livesEl.textContent=lives;
+if(lives<=0){showGameOver();return;}
+resetBall();
+}
+
+if(right&&paddle.x<canvas.width-paddle.w)paddle.x+=paddle.speed;
+if(left&&paddle.x>0)paddle.x-=paddle.speed;
+
+requestAnimationFrame(loop);
+}
+
+/* ===== GAME FLOW ===== */
+document.getElementById("startBtn").onclick=()=>{
+level=+document.getElementById("levelSelect").value;
+levelEl.textContent=level;
+score=0;lives=3;
+scoreEl.textContent=0;livesEl.textContent=3;
+paddle.w=levels[level].paddle;
+paddle.x=canvas.width/2-paddle.w/2;
+initBricks();resetBall();
+menu.classList.add("hidden");
+canvas.style.display="block";
+overlay.style.display="none";
+running=true;
+loop();
+};
+
+function restartSameLevel(){
+overlay.style.display="none";
+score=0;lives=3;
+scoreEl.textContent=0;livesEl.textContent=3;
+initBricks();resetBall();
+running=true;
+loop();
+}
+
+function backToMenu(){
+overlay.style.display="none";
+canvas.style.display="none";
+menu.classList.remove("hidden");
+}
+
+function exitGame(){
+overlay.style.display="none";
+canvas.style.display="none";
+menu.classList.remove("hidden");
+}
+</script>
+
+</body>
+</html>
